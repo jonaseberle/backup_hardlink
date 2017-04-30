@@ -1,0 +1,201 @@
+#! /bin/bash
+# @author jonas.eberle@aero.de / flightvision@googlemail.com
+echo "---------------------------------------------------------"
+echo "$0 --- $(date -Is -u)"
+
+CONF_PATH="$(dirname $0)/$(basename $0 _cleaner).conf"
+NOT_REALLY=false
+
+while test $# -gt 0
+do
+    case "$1" in
+        -n)
+		echo "not really: no filesystem changes will be done."
+		NOT_REALLY=true
+	;;
+        *) 
+		CONF_PATH="$1"
+	;;
+    esac
+    shift
+done
+
+
+
+printf "Reading configuration from '%s'.\n" "$CONF_PATH"
+if ! . "$CONF_PATH"; then 
+	exit 1
+fi
+
+
+# @var $1... commandline
+# ' needs to be escaped
+
+execute () {
+	if [ "$1" == "--quiet" ]; then
+		shift
+	fi
+	local DO="${BACKUP_CONSOLE_PREFIX} $@"
+
+	if [ "$1" != "--quiet" ]; then
+		echo "   $DO"
+	fi
+	RES=$(eval "$DO")
+}
+
+executeChanges () {
+	if [ "$1" == "--quiet" ]; then
+		shift
+	fi
+	local DO="${BACKUP_CONSOLE_PREFIX} $@"
+
+	if [ "$1" != "--quiet" ]; then
+		echo "        $DO"
+	fi
+	
+	if ! $NOT_REALLY; then
+		$DO
+	else
+		echo "          <- not executed due to the -n switch."
+	fi
+}
+
+
+
+
+# check for needed programs
+_REMOTEPROGS=(ls rm grep tr date sh)
+printf "Checking availability of '%s' in environment '%s'...\n" "${_REMOTEPROGS[*]}" "$BACKUP_CONSOLE_PREFIX"
+for PROG in ${_REMOTEPROGS[*]}; do
+	if ! $BACKUP_CONSOLE_PREFIX type $PROG > /dev/null; then
+		printf "Program '%s' in environment '%s' not in search path.\n" "$PROG" "$BACKUP_CONSOLE_PREFIX"
+		exit 1
+	fi
+done
+
+# check for optional programs
+_REMOTEPROGS=(nice)
+printf "Checking availability of '%s' in environment '%s'...\n" "${_REMOTEPROGS[*]}" "$BACKUP_CONSOLE_PREFIX"
+for PROG in ${_REMOTEPROGS[*]}; do
+	if ! $BACKUP_CONSOLE_PREFIX type $PROG > /dev/null; then
+		printf "Optional program '%s' in environment '%s' not in search path.\n" "$PROG" "$BACKUP_CONSOLE_PREFIX"
+		_NICE=""		
+	else
+		_NICE="nice"		
+	fi
+done
+
+_REMOTEPROGS=(ionice)
+printf "Checking availability of '%s' in environment '%s'...\n" "${_REMOTEPROGS[*]}" "$BACKUP_CONSOLE_PREFIX"
+for PROG in ${_REMOTEPROGS[*]}; do
+	if ! $BACKUP_CONSOLE_PREFIX type $PROG > /dev/null; then
+		printf "Optional program '%s' in environment '%s' not in search path.\n" "$PROG" "$BACKUP_CONSOLE_PREFIX"
+		_IONICE=""		
+	else
+		_IONICE="ionice -c3"
+	fi
+done
+
+_REMOTEPROGS=(screen)
+printf "Checking availability of '%s' in environment '%s'...\n" "${_REMOTEPROGS[*]}" "$BACKUP_CONSOLE_PREFIX"
+for PROG in ${_REMOTEPROGS[*]}; do
+	if ! $BACKUP_CONSOLE_PREFIX type $PROG > /dev/null; then
+		printf "Optional program '%s' in environment '%s' not in search path.\n" "$PROG" "$BACKUP_CONSOLE_PREFIX"
+		_SCREEN=""		
+	else
+		_SCREEN="screen -d -m"		
+	fi
+done
+
+
+for DIR in ${LOCAL_DIRS[*]}; do
+	REMOTE_ROOTDIR=${BACKUP_DIR}$(echo ${DIR} | tr -s '/' '_')/
+	echo "$REMOTE_ROOTDIR"
+
+	# clean -wip-del - directories (all)
+	
+	echo "   looking for backups marked for deletion..."
+	execute "ls $REMOTE_ROOTDIR 2> /dev/null | grep -E '\-wip\-del$'"
+	REMOTE_DIRS=( "${RES[@]}" )
+
+	for REMOTE_DIR in ${REMOTE_DIRS[*]}; do
+		echo '     ' $REMOTE_DIR ' will be deleted'
+		SCREEN_CMDS+=("$_IONICE $_NICE rm -rf ${REMOTE_ROOTDIR}${REMOTE_DIR};")
+	done
+	# clean -wip - directories (all but last if it is in progroess)
+	echo "   looking for unfinished backups..."
+	execute "ls $REMOTE_ROOTDIR 2> /dev/null | sed \\\$d | grep -E '\-wip$'" # all but last
+    	REMOTE_DIRS=( "${RES[@]}" )
+	for REMOTE_DIR in ${REMOTE_DIRS[*]}; do
+		echo '     ' $REMOTE_DIR ' will be deleted'
+		SCREEN_CMDS+=("$_IONICE $_NICE rm -rf ${REMOTE_ROOTDIR}${REMOTE_DIR};")
+	done
+
+
+	# widen intervals between older backups increasingly
+	echo '   gathering backups...'
+	execute "ls -r $REMOTE_ROOTDIR 2> /dev/null | grep -Ev '\-(wip|wip-del)$'"
+	REMOTE_DIRS=( $RES )
+	# remove the oldest backup so that it will never get deleted
+	echo "    I will preserve the oldest," ${REMOTE_DIRS[${#REMOTE_DIRS[@]}-1]}
+	unset REMOTE_DIRS[${#REMOTE_DIRS[@]}-1]
+	
+	INTERVAL_s=$INTERVAL_INITIAL_s
+	execute --quiet date +%s
+	TARGET_s=$RES
+
+	# testing: check reactions in the future
+	#TARGET_s=$(expr $TARGET_s + 10 \* 24 \* 60 \* 60)
+
+	REMOTE_DIR_s_=$TARGET_s
+	for REMOTE_DIR in ${REMOTE_DIRS[*]}; do
+		# testing:
+		#mkdir -p /tmp/$REMOTE_ROOTDIR/$REMOTE_DIR
+	
+		REMOTE_DIR_s=$(date --date="$(echo $REMOTE_DIR | tr -s '_' ' ')" +%s)
+		DELTA_s=$(expr $REMOTE_DIR_s_ - $REMOTE_DIR_s)
+
+		# get TARGET that is 1 step newer than the next backup
+		TARGET_s_=$TARGET_s
+		INTERVAL_s_=$INTERVAL_s
+		while [ $TARGET_s -gt $REMOTE_DIR_s ]; do
+			TARGET_s_=$TARGET_s
+			INTERVAL_s_=$INTERVAL_s
+			INTERVAL_s=$(expr $INTERVAL_s \* $INTERVAL_MULTI / 100)
+			TARGET_s=$(expr $TARGET_s - $INTERVAL_s)
+			echo "    target interval:$(expr $INTERVAL_s / 60 / 60)h   target:$(date --date=@$TARGET_s $DATE_FMT)"
+		done		
+		TARGET_s=$TARGET_s_ # go back 1 step
+		INTERVAL_s=$INTERVAL_s_ # go back 1 step
+
+		echo "       backup:$REMOTE_DIR   delta to last:$(expr $DELTA_s / 60 / 60)h"
+		
+		REMOTE_DIR_s_=$REMOTE_DIR_s
+
+		if [ $TARGET_s -lt $REMOTE_DIR_s ]; then
+			echo '           -> will be deleted'
+			executeChanges "mv ${REMOTE_ROOTDIR}${REMOTE_DIR} ${REMOTE_ROOTDIR}${REMOTE_DIR}-wip-del"
+
+			SCREEN_CMDS+=("$_IONICE $_NICE rm -rf ${REMOTE_ROOTDIR}${REMOTE_DIR}-wip-del;")
+
+			continue
+		fi
+
+		INTERVAL_s=$(expr $INTERVAL_s \* $INTERVAL_MULTI / 100)
+		TARGET_s=$(expr $TARGET_s - $INTERVAL_s)
+	done
+done
+
+
+# execute all deletions in a forked process
+
+if [ "${#SCREEN_CMDS[@]}" -gt 0 ]; then
+	echo "sending all deletions to remote server..."
+	executeChanges "$_SCREEN sh -c \"${SCREEN_CMDS[@]}\""
+	#executeChanges "${SCREEN_CMDS[@]}"
+fi
+
+# TODO: http://stackoverflow.com/questions/285015/linux-prevent-a-background-process-from-being-stopped-after-closing-ssh-client
+# TODO: checkout double forking instead of screen: ((exec sleep 30)&)
+
+exit 0

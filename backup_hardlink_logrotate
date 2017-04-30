@@ -1,0 +1,8 @@
+/var/log/backup_hardlink.log {
+  weekly
+  rotate 4
+  missingok
+  notifempty
+  compress
+}
+

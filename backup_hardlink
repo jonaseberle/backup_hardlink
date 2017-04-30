@@ -1,0 +1,94 @@
+#! /bin/bash
+# @author jonas.eberle@aero.de / flightvision@googlemail.com
+# @param CONF_PATH
+# @param further rsync-params
+# TODO: re-enable rsync -z (zlib problem with huge files in newer rsync version)
+# KNOWN: on first (aborted) run: tries to hardlink although there is only one unfinished -wip (only a cosmetical issue)
+
+echo "---------------------------------------------------------"
+echo "$0 --- $(date -Is -u)"
+
+if [ -z "$1" ]; then
+	CONF_PATH="${0}.conf"
+else
+	CONF_PATH="$1"
+fi
+
+printf "Reading configuration from '%s'.\n" "$CONF_PATH"
+if ! . "$CONF_PATH"; then
+	exit 1
+fi
+
+# all following params are additional rsync-params
+shift
+RSYNC_PARAMS="$@"
+
+# check for needed programs
+_REMOTEPROGS=(rsync mkdir ls cp)
+printf "Checking availability of '%s' in environment '%s'...\n" "${_REMOTEPROGS[*]}" "$BACKUP_CONSOLE_PREFIX"
+for PROG in ${_REMOTEPROGS[*]}; do
+	echo $BACKUP_CONSOLE_PREFIX type $PROG
+	if ! $BACKUP_CONSOLE_PREFIX type $PROG > /dev/null; then
+		printf "  Program '%s' in environment '%s' not in search path.\n" "$PROG" "$BACKUP_CONSOLE_PREFIX"
+		exit 1
+	fi
+done
+
+for EXCL in ${EXCLUDE[*]}; do
+	EXCLUDES="$EXCLUDES --exclude=\"$EXCL\""
+done
+
+if [ -n "$PRE_COMMAND" ]; then
+	printf "Running PRE_COMMAND: ‹%s›\n" "$PRE_COMMAND"
+	eval $PRE_COMMAND
+fi
+
+for DIR in ${LOCAL_DIRS[*]}; do
+	echo "  $DIR"
+	TIMESTAMP=$(date -u $DATE_FMT)
+	REMOTE_ROOTDIR=${BACKUP_DIR}$(echo ${DIR} | tr -s '/' '_')/
+
+	# create root-dir if non-existent
+	DO="eval $BACKUP_CONSOLE_PREFIX mkdir -p ${REMOTE_ROOTDIR} 2> /dev/null"
+	echo "   $DO"
+	$DO
+
+	REMOTE_DIR=${REMOTE_ROOTDIR}${TIMESTAMP}
+	DO="eval $BACKUP_CONSOLE_PREFIX ls -c $REMOTE_ROOTDIR 2> /dev/null | grep -Ev '\-wip-del$' | head -n1"
+	echo "   $DO"
+	TIMESTAMP_NEWEST=$($DO)
+	if [ -n "$TIMESTAMP_NEWEST" ]; then
+		if echo -n $TIMESTAMP_NEWEST | grep -E '\-wip$'; then
+			printf "     Found uncompleted backup from '%s'. Reusing it.'\n" "$TIMESTAMP_NEWEST"
+			DO="eval $BACKUP_CONSOLE_PREFIX mv ${REMOTE_ROOTDIR}${TIMESTAMP_NEWEST} ${REMOTE_DIR}-wip"
+			echo "       $DO"
+			$DO
+
+			DO="eval $BACKUP_CONSOLE_PREFIX ls -c $REMOTE_ROOTDIR 2> /dev/null | grep -Ev '\-(wip|wip-del)$' | head -n1"
+		        #echo "   $DO"
+		        TIMESTAMP_NEWEST=$($DO)
+		fi
+		REMOTE_NEWEST=${REMOTE_ROOTDIR}${TIMESTAMP_NEWEST}
+		DO="eval $BACKUP_CONSOLE_PREFIX mkdir -p ${REMOTE_DIR}-wip 2> /dev/null"
+		#echo "   $DO"
+		$DO
+	        printf "     Found recent backup. Syncing '%s' to '%s' with hardlinks from '%s'\n" "$DIR" "${REMOTE_DIR}-wip" "$REMOTE_NEWEST"
+		DO="eval rsync -a$EXCLUDES --links --one-file-system --timeout=100 --delete-excluded --delete-after --link-dest=$REMOTE_NEWEST $RSYNC_PARAMS $DIR $BACKUP_RSYNC_PREFIX${REMOTE_DIR}-wip"
+		echo "       $DO"
+		$DO \
+		&& DO="eval $BACKUP_CONSOLE_PREFIX mv ${REMOTE_DIR}-wip $REMOTE_DIR" \
+		&& echo "       $DO" \
+		&& $DO
+	else
+		printf "     No recent backup found. Syncing '%s' to '%s'\n" "$DIR" "${REMOTE_DIR}-wip"
+		DO="eval rsync --links --one-file-system --delete-after --timeout=100 -a$EXCLUDES $RSYNC_PARAMS $DIR $BACKUP_RSYNC_PREFIX${REMOTE_DIR}-wip"
+		echo "       $DO"
+		$DO \
+		&& DO="eval $BACKUP_CONSOLE_PREFIX mv ${REMOTE_DIR}-wip $REMOTE_DIR" \
+		&& echo "       $DO" \
+		&& $DO
+	fi
+done
+
+echo "$0 --- $(date -Is -u) -- finished"
+exit 0

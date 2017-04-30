@@ -1,0 +1,28 @@
+#! /bin/bash
+# @author jonas.eberle@aero.de / flightvision@googlemail.com
+
+THIS=$(readlink -f $0)
+CONF=/etc/backup_hardlink.conf
+LOG=/var/log/$(basename $THIS _wrapper).log
+# ionice -c 3 : idle i/o
+# nice : nice += 10
+EXEC="$(dirname $THIS)/$(basename $THIS _wrapper) $CONF --partial --append-verify --progress --verbose --timeout=500"
+# Error mit --compress"
+ionice -c 2 -n 7 nice $EXEC >> $LOG 2>&1
+
+# check if running
+ps aux | grep "$EXEC" | grep -v grep > /dev/null
+if [ $? -eq 0 ]; then
+	exit 0 # 1 is spamming our root@ mail account
+fi
+
+EXEC="$(dirname $THIS)/$(basename $THIS _wrapper)_cleaner $CONF"
+
+# check if running
+ps aux | grep "$EXEC" | grep -v grep > /dev/null
+if [ $? -eq 0 ]; then
+	exit 0 # 1 is spamming our root@ mail account
+fi
+
+ionice -c 2 -n 7 nice $EXEC >> $LOG 2>&1
+exit $?
