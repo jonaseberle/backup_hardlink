@@ -1,6 +1,6 @@
 #! /bin/bash
 # @author jonas.eberle@aero.de / flightvision@googlemail.com
-# @param CONF_PATH
+# @param confPath
 # @param further rsync-params
 # TODO: re-enable rsync -z (zlib problem with huge files in newer rsync version)
 # KNOWN: on first (aborted) run: tries to hardlink although there is only one unfinished -wip (only a cosmetical issue)
@@ -9,33 +9,33 @@ echo "---------------------------------------------------------"
 echo "$0 --- $(date -Is -u)"
 
 if [ -z "$1" ]; then
-	CONF_PATH="${0}.conf"
+	confPath="${0}.conf"
 else
-	CONF_PATH="$1"
+	confPath="$1"
 fi
 
-printf "Reading configuration from '%s'.\n" "$CONF_PATH"
-if ! . "$CONF_PATH"; then
+printf "Reading configuration from '%s'.\n" "$confPath"
+if ! . "$confPath"; then
 	exit 1
 fi
 
 # all following params are additional rsync-params
 shift
-RSYNC_PARAMS="$@"
+rsyncParams="$@"
 
 # check for needed programs
-_REMOTEPROGS=(rsync mkdir ls cp)
-printf "Checking availability of '%s' in environment '%s'...\n" "${_REMOTEPROGS[*]}" "$BACKUP_CONSOLE_PREFIX"
-for PROG in ${_REMOTEPROGS[*]}; do
-	echo $BACKUP_CONSOLE_PREFIX type $PROG
-	if ! $BACKUP_CONSOLE_PREFIX type $PROG > /dev/null; then
-		printf "  Program '%s' in environment '%s' not in search path.\n" "$PROG" "$BACKUP_CONSOLE_PREFIX"
+_remoteProgs=(rsync mkdir ls cp)
+printf "Checking availability of '%s' in environment '%s'...\n" "${_remoteProgs[*]}" "$BACKUP_CONSOLE_PREFIX"
+for prog in ${_remoteProgs[*]}; do
+	echo $BACKUP_CONSOLE_PREFIX type $prog
+	if ! $BACKUP_CONSOLE_PREFIX type $prog > /dev/null; then
+		printf "  Program '%s' in environment '%s' not in search path.\n" "$prog" "$BACKUP_CONSOLE_PREFIX"
 		exit 1
 	fi
 done
 
-for EXCL in ${EXCLUDE[*]}; do
-	EXCLUDES="$EXCLUDES --exclude=\"$EXCL\""
+for ((i=0; i < ${#EXCLUDE[@]}; i++)); do
+	excludes="$excludes --exclude=\"${EXCLUDE[$i]}\""
 done
 
 if [ -n "$PRE_COMMAND" ]; then
@@ -43,48 +43,61 @@ if [ -n "$PRE_COMMAND" ]; then
 	eval $PRE_COMMAND
 fi
 
-for DIR in ${LOCAL_DIRS[*]}; do
-	echo "  $DIR"
-	TIMESTAMP=$(date -u $DATE_FMT)
-	REMOTE_ROOTDIR=${BACKUP_DIR}$(echo ${DIR} | tr -s '/' '_')/
+for ((i=0; i < ${#LOCAL_DIRS[@]}; i++)); do
+	dir="${LOCAL_DIRS[$i]}"
+	echo "  $dir"
+	timestamp=$(date -u $DATE_FMT)
+	remoteRootdir=${BACKUP_DIR}$(echo ${dir} | tr -s '/' '_')/
 
 	# create root-dir if non-existent
-	DO="eval $BACKUP_CONSOLE_PREFIX mkdir -p ${REMOTE_ROOTDIR} 2> /dev/null"
+	DO="eval $BACKUP_CONSOLE_PREFIX mkdir -p ${remoteRootdir} 2> /dev/null"
 	echo "   $DO"
 	$DO
 
-	REMOTE_DIR=${REMOTE_ROOTDIR}${TIMESTAMP}
-	DO="eval $BACKUP_CONSOLE_PREFIX ls -c $REMOTE_ROOTDIR 2> /dev/null | grep -Ev '\-wip-del$' | head -n1"
+	remoteDir=${remoteRootdir}${timestamp}
+	DO="eval $BACKUP_CONSOLE_PREFIX ls -c $remoteRootdir 2> /dev/null | grep -Ev '\-wip-del$' | head -n1"
 	echo "   $DO"
-	TIMESTAMP_NEWEST=$($DO)
-	if [ -n "$TIMESTAMP_NEWEST" ]; then
-		if echo -n $TIMESTAMP_NEWEST | grep -E '\-wip$'; then
-			printf "     Found uncompleted backup from '%s'. Reusing it.'\n" "$TIMESTAMP_NEWEST"
-			DO="eval $BACKUP_CONSOLE_PREFIX mv ${REMOTE_ROOTDIR}${TIMESTAMP_NEWEST} ${REMOTE_DIR}-wip"
+	timestampNewest=$($DO)
+	if [ -n "$timestampNewest" ]; then
+		# dir already exists
+		if [ "$timestamp" = "$timestampNewest"	]; then
+                        printf "     Found finished backup with same timestamp '%s'. Reusing it.'\n" "$timestampNewest"
+                        DO="eval $BACKUP_CONSOLE_PREFIX mv ${remoteRootdir}${timestampNewest} ${remoteDir}-wip"
+                        echo "       $DO"
+                        $DO
+
+			DO="eval $BACKUP_CONSOLE_PREFIX ls -c $remoteRootdir 2> /dev/null | grep -Ev '\-(wip|wip-del)$' | head -n1"
+		        #echo "   $DO"
+		        timestampNewest=$($DO)
+		fi
+
+		if echo -n $timestampNewest | grep -E '\-wip$'; then
+			printf "     Found uncompleted backup from '%s'. Reusing it.'\n" "$timestampNewest"
+			DO="eval $BACKUP_CONSOLE_PREFIX mv ${remoteRootdir}${timestampNewest} ${remoteDir}-wip"
 			echo "       $DO"
 			$DO
 
-			DO="eval $BACKUP_CONSOLE_PREFIX ls -c $REMOTE_ROOTDIR 2> /dev/null | grep -Ev '\-(wip|wip-del)$' | head -n1"
+			DO="eval $BACKUP_CONSOLE_PREFIX ls -c $remoteRootdir 2> /dev/null | grep -Ev '\-(wip|wip-del)$' | head -n1"
 		        #echo "   $DO"
-		        TIMESTAMP_NEWEST=$($DO)
+		        timestampNewest=$($DO)
 		fi
-		REMOTE_NEWEST=${REMOTE_ROOTDIR}${TIMESTAMP_NEWEST}
-		DO="eval $BACKUP_CONSOLE_PREFIX mkdir -p ${REMOTE_DIR}-wip 2> /dev/null"
+		remoteNewest=${remoteRootdir}${timestampNewest}
+		DO="eval $BACKUP_CONSOLE_PREFIX mkdir -p ${remoteDir}-wip 2> /dev/null"
 		#echo "   $DO"
 		$DO
-	        printf "     Found recent backup. Syncing '%s' to '%s' with hardlinks from '%s'\n" "$DIR" "${REMOTE_DIR}-wip" "$REMOTE_NEWEST"
-		DO="eval rsync -a$EXCLUDES --links --one-file-system --timeout=100 --delete-excluded --delete-after --link-dest=$REMOTE_NEWEST $RSYNC_PARAMS $DIR $BACKUP_RSYNC_PREFIX${REMOTE_DIR}-wip"
+	        printf "     Found recent backup. Syncing '%s' to '%s' with hardlinks from '%s'\n" "$dir" "${remoteDir}-wip" "$remoteNewest"
+		DO="eval rsync -a$excludes --links --one-file-system --timeout=100 --delete-excluded --delete-after --link-dest=$remoteNewest $rsyncParams $dir $BACKUP_RSYNC_PREFIX${remoteDir}-wip"
 		echo "       $DO"
 		$DO \
-		&& DO="eval $BACKUP_CONSOLE_PREFIX mv ${REMOTE_DIR}-wip $REMOTE_DIR" \
+		&& DO="eval $BACKUP_CONSOLE_PREFIX mv ${remoteDir}-wip $remoteDir" \
 		&& echo "       $DO" \
 		&& $DO
 	else
-		printf "     No recent backup found. Syncing '%s' to '%s'\n" "$DIR" "${REMOTE_DIR}-wip"
-		DO="eval rsync --links --one-file-system --delete-after --timeout=100 -a$EXCLUDES $RSYNC_PARAMS $DIR $BACKUP_RSYNC_PREFIX${REMOTE_DIR}-wip"
+		printf "     No recent backup found. Syncing '%s' to '%s'\n" "$dir" "${remoteDir}-wip"
+		DO="eval rsync --links --one-file-system --delete-after --timeout=100 -a$excludes $rsyncParams $dir $BACKUP_RSYNC_PREFIX${remoteDir}-wip"
 		echo "       $DO"
 		$DO \
-		&& DO="eval $BACKUP_CONSOLE_PREFIX mv ${REMOTE_DIR}-wip $REMOTE_DIR" \
+		&& DO="eval $BACKUP_CONSOLE_PREFIX mv ${remoteDir}-wip $remoteDir" \
 		&& echo "       $DO" \
 		&& $DO
 	fi

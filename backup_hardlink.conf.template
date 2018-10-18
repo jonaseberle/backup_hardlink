@@ -1,4 +1,4 @@
-# @author jonas.eberle@aero.de / flightvision@googlemail.com
+# copyright jonas.eberle@aero.de
 # with leading and trailing /
 LOCAL_DIRS=(/etc/ /root/ /var/www/ /home/)
 
@@ -7,7 +7,6 @@ LOCAL_DIRS=(/etc/ /root/ /var/www/ /home/)
 
 EXCLUDE=(tmp Private .gvfs .thumbnails Trash .cache cache caches .steam Musik Hörbücher Bilder Videos Dropbox Fliegen games)
 
-BACKUP_SRV=casinix
 # what to prefix to issue console commands on the system, e.g. 'ssh server', or '' if local.
 BACKUP_CONSOLE_PREFIX="ssh casinix"
 # the prefix used for rsync, e.g. 'server:' or '' if local
@@ -20,5 +19,8 @@ BACKUP_DIR=/mnt/2T/_BACKUP_tux/
 INTERVAL_INITIAL_s=600
 # interval multiplier in 1/100. The higher, the quicker the interval increases
 INTERVAL_MULTI=120
+# oldest backup to keep (days)
+MAX_AGE_d=30
 
+# directory names as format as used by `date`
 DATE_FMT='+%Y%m%d_%H%M'
