@@ -1,12 +1,14 @@
 #! /bin/bash
 # @author jonas.eberle@aero.de / flightvision@googlemail.com
-# @param confPath
-# @param further rsync-params
+# @param file path to configuration file (default: same directory/backup_hardlink.conf)
+# @param all further parameters are appended to rsync
 # TODO: re-enable rsync -z (zlib problem with huge files in newer rsync version)
 # KNOWN: on first (aborted) run: tries to hardlink although there is only one unfinished -wip (only a cosmetical issue)
 
 echo "---------------------------------------------------------"
 echo "$0 --- $(date -Is -u)"
+
+isVerbose=0
 
 if [ -z "$1" ]; then
 	confPath="${0}.conf"
@@ -27,7 +29,7 @@ rsyncParams="$@"
 _remoteProgs=(rsync mkdir ls cp)
 printf "Checking availability of '%s' in environment '%s'...\n" "${_remoteProgs[*]}" "$BACKUP_CONSOLE_PREFIX"
 for prog in ${_remoteProgs[*]}; do
-	echo $BACKUP_CONSOLE_PREFIX type $prog
+	[ 1 == $isVerbose ] && echo $BACKUP_CONSOLE_PREFIX type $prog
 	if ! $BACKUP_CONSOLE_PREFIX type $prog > /dev/null; then
 		printf "  Program '%s' in environment '%s' not in search path.\n" "$prog" "$BACKUP_CONSOLE_PREFIX"
 		exit 1
@@ -45,62 +47,80 @@ fi
 
 for ((i=0; i < ${#LOCAL_DIRS[@]}; i++)); do
 	dir="${LOCAL_DIRS[$i]}"
-	echo "  $dir"
-	timestamp=$(date -u $DATE_FMT)
-	remoteRootdir=${BACKUP_DIR}$(echo ${dir} | tr -s '/' '_')/
+	isContinue=1 # we set this to 1 if we want to re-try
+	while [ 1 == $isContinue ]; do
+		isContinue=0
 
-	# create root-dir if non-existent
-	DO="eval $BACKUP_CONSOLE_PREFIX mkdir -p ${remoteRootdir} 2> /dev/null"
-	echo "   $DO"
-	$DO
+		echo "  $dir"
+		timestamp=$(date -u $DATE_FMT)
+		remoteRootdir=${BACKUP_DIR}$(echo ${dir} | tr -s '/' '_')/
 
-	remoteDir=${remoteRootdir}${timestamp}
-	DO="eval $BACKUP_CONSOLE_PREFIX ls -c $remoteRootdir 2> /dev/null | grep -Ev '\-wip-del$' | head -n1"
-	echo "   $DO"
-	timestampNewest=$($DO)
-	if [ -n "$timestampNewest" ]; then
-		# dir already exists
-		if [ "$timestamp" = "$timestampNewest"	]; then
-                        printf "     Found finished backup with same timestamp '%s'. Reusing it.'\n" "$timestampNewest"
-                        DO="eval $BACKUP_CONSOLE_PREFIX mv ${remoteRootdir}${timestampNewest} ${remoteDir}-wip"
-                        echo "       $DO"
-                        $DO
-
-			DO="eval $BACKUP_CONSOLE_PREFIX ls -c $remoteRootdir 2> /dev/null | grep -Ev '\-(wip|wip-del)$' | head -n1"
-		        #echo "   $DO"
-		        timestampNewest=$($DO)
-		fi
-
-		if echo -n $timestampNewest | grep -E '\-wip$'; then
-			printf "     Found uncompleted backup from '%s'. Reusing it.'\n" "$timestampNewest"
-			DO="eval $BACKUP_CONSOLE_PREFIX mv ${remoteRootdir}${timestampNewest} ${remoteDir}-wip"
-			echo "       $DO"
-			$DO
-
-			DO="eval $BACKUP_CONSOLE_PREFIX ls -c $remoteRootdir 2> /dev/null | grep -Ev '\-(wip|wip-del)$' | head -n1"
-		        #echo "   $DO"
-		        timestampNewest=$($DO)
-		fi
-		remoteNewest=${remoteRootdir}${timestampNewest}
-		DO="eval $BACKUP_CONSOLE_PREFIX mkdir -p ${remoteDir}-wip 2> /dev/null"
-		#echo "   $DO"
+		# create root-dir if non-existent
+		DO="eval $BACKUP_CONSOLE_PREFIX mkdir -p ${remoteRootdir} 2> /dev/null"
+		[ 1 == $isVerbose ] && echo "   $DO"
 		$DO
-	        printf "     Found recent backup. Syncing '%s' to '%s' with hardlinks from '%s'\n" "$dir" "${remoteDir}-wip" "$remoteNewest"
-		DO="eval rsync -a$excludes --links --one-file-system --timeout=100 --delete-excluded --delete-after --link-dest=$remoteNewest $rsyncParams $dir $BACKUP_RSYNC_PREFIX${remoteDir}-wip"
-		echo "       $DO"
-		$DO \
-		&& DO="eval $BACKUP_CONSOLE_PREFIX mv ${remoteDir}-wip $remoteDir" \
-		&& echo "       $DO" \
-		&& $DO
-	else
-		printf "     No recent backup found. Syncing '%s' to '%s'\n" "$dir" "${remoteDir}-wip"
-		DO="eval rsync --links --one-file-system --delete-after --timeout=100 -a$excludes $rsyncParams $dir $BACKUP_RSYNC_PREFIX${remoteDir}-wip"
-		echo "       $DO"
-		$DO \
-		&& DO="eval $BACKUP_CONSOLE_PREFIX mv ${remoteDir}-wip $remoteDir" \
-		&& echo "       $DO" \
-		&& $DO
-	fi
+
+		remoteDir=${remoteRootdir}${timestamp}
+
+		DO="eval $BACKUP_CONSOLE_PREFIX ls -c $remoteRootdir 2> /dev/null | grep -Ev '\-wip-del$' | head -n1"
+		[ 1 == $isVerbose ] && echo "   $DO"
+		timestampNewest=$($DO)
+		if [ -n "$timestampNewest" ]; then
+			# dir already exists
+			if [ "$timestamp" = "$timestampNewest"	]; then
+							printf "     Found finished backup with same timestamp '%s'. Reusing it.'\n" "$timestampNewest"
+							DO="eval $BACKUP_CONSOLE_PREFIX mv ${remoteRootdir}${timestampNewest} ${remoteDir}-wip"
+							[ 1 == $isVerbose ] && echo "       $DO"
+							$DO
+
+				DO="eval $BACKUP_CONSOLE_PREFIX ls -c $remoteRootdir 2> /dev/null | grep -Ev '\-(wip|wip-del)$' | head -n1"
+					#echo "   $DO"
+					timestampNewest=$($DO)
+			fi
+
+			if echo -n $timestampNewest | grep -E '\-wip$' > /dev/null; then
+				printf "     Found incomplete backup '%s'. Reusing it.'\n" "$timestampNewest"
+				DO="eval $BACKUP_CONSOLE_PREFIX mv ${remoteRootdir}${timestampNewest} ${remoteDir}-wip"
+				[ 1 == $isVerbose ] && echo "       $DO"
+				$DO
+
+				DO="eval $BACKUP_CONSOLE_PREFIX ls -c $remoteRootdir 2> /dev/null | grep -Ev '\-(wip|wip-del)$' | head -n1"
+					#echo "   $DO"
+					timestampNewest=$($DO)
+			fi
+			remoteNewest=${remoteRootdir}${timestampNewest}
+			DO="eval $BACKUP_CONSOLE_PREFIX mkdir -p ${remoteDir}-wip 2> /dev/null"
+			#echo "   $DO"
+			$DO
+				printf "     Found recent backup. Syncing '%s' to '%s' with hardlinks from '%s'\n" "$dir" "${remoteDir}" "$remoteNewest"
+			DO="eval rsync -a$excludes --links --one-file-system --timeout=100 --delete-excluded --delete-after --link-dest=$remoteNewest $rsyncParams $dir $BACKUP_RSYNC_PREFIX${remoteDir}-wip"
+			[ 1 == $isVerbose ] && echo "       $DO"
+			$DO
+			_exitCodeRsync=$?
+			if [ 30 == $_exitCodeRsync ]; then # timeout
+				echo "   rsync encountered a timeout. We are retrying now !"
+				isContinue=1
+			elif [ 0 == $_exitCodeRsync ]; then # success
+				DO="eval $BACKUP_CONSOLE_PREFIX mv ${remoteDir}-wip $remoteDir" 
+				[ 1 == $isVerbose ] && echo "       $DO" 
+				$DO
+			fi
+		else
+			printf "     No recent backup found. Syncing '%s' to '%s'\n" "$dir" "${remoteDir}-wip"
+			DO="eval rsync --links --one-file-system --delete-after --timeout=100 -a$excludes $rsyncParams $dir $BACKUP_RSYNC_PREFIX${remoteDir}-wip"
+			[ 1 == $isVerbose ] && echo "       $DO"
+			_exitCodeRsync=$?
+			if [ 30 == $_exitCodeRsync ]; then # timeout
+				echo "   rsync encountered a timeout. We are retrying now !!!!"
+				isContinue=1
+			elif [ 0 == $_exitCodeRsync ]; then # success
+				$DO
+				DO="eval $BACKUP_CONSOLE_PREFIX mv ${remoteDir}-wip $remoteDir" 
+				[ 1 == $isVerbose ] && echo "       $DO" 
+				$DO
+			fi
+		fi
+	done
 done
 
 echo "$0 --- $(date -Is -u) -- finished"

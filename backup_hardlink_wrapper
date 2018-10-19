@@ -19,7 +19,7 @@ LOCKFILE=/var/lock/backup_hardlink
 	trap "rm $LOCKFILE 2> /dev/null" EXIT INT KILL TERM
 			        
 	# Error with --compress"
-	EXEC="$(dirname $THIS)/$(basename $THIS _wrapper) $CONF --partial --progress --verbose --timeout=500"
+	EXEC="$(dirname $THIS)/$(basename $THIS _wrapper) $CONF --partial --progress --verbose"
 	ionice -c 2 -n 7 nice $EXEC >> $LOG 2>&1
 
 	EXEC="$(dirname $THIS)/$(basename $THIS _wrapper)_cleaner $CONF"

@@ -9,6 +9,7 @@ echo "$0 --- $(date -Is -u)"
 
 confPath="$(dirname $0)/$(basename $0 _cleaner).conf"
 notReally=false
+isVerbose=0
 
 while test $# -gt 0
 do
