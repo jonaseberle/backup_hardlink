@@ -1,18 +1,24 @@
-# copyright jonas.eberle@aero.de
-# with leading and trailing /
+# Configuration file for backup_hardlink 
+# https://github.com/jonaseberle/backup_hardlink
+#
+# To get it running, LOCAL_DIRS and the BACKUP_* variables are all you need
+
+# The directories on the local system that shall be backed-up. 
+# Absolute paths with trailing /
 LOCAL_DIRS=(/etc/ /root/ /var/www/ /home/)
 
 # command that will be executed before backing up files. (useful for e.g. database dumps)
-#PRE_COMMAND="mysqldump > /home/jonas/dump.sql"
+#PRE_COMMAND="mysqldump > /home/me/dump.sql"
 
-EXCLUDE=(tmp Private .gvfs .thumbnails Trash .cache cache caches .steam Musik Hörbücher Bilder Videos Dropbox Fliegen games)
+# these paths or file masks will be excluded. Follows the rsync --exclude conventions (use a leading / to only match in the root folder)
+EXCLUDE=(tmp /me/Private .gvfs .thumbnails Trash .cache cache caches .steam)
 
-# what to prefix to issue console commands on the system, e.g. 'ssh server', or '' if local.
-BACKUP_CONSOLE_PREFIX="ssh casinix"
-# the prefix used for rsync, e.g. 'server:' or '' if local
-BACKUP_RSYNC_PREFIX="casinix:"
+# what to prefix to issue console commands on the system, e.g. 'ssh backupserver', or '' if local.
+BACKUP_CONSOLE_PREFIX="ssh backupserver"
+# the prefix used for rsync, e.g. 'backupserver:' or '' if local
+BACKUP_RSYNC_PREFIX="backupserver:"
 
-# with trailing /
+# Root path where backups wil be stored. A structure LOCAL_DIR/TIMESTAMP/... will be created under this With trailing /
 BACKUP_DIR=/mnt/2T/_BACKUP_tux/
 
 # initial interval length (in s).
@@ -24,3 +30,6 @@ MAX_AGE_d=30
 
 # directory names as format as used by `date`
 DATE_FMT='+%Y%m%d_%H%M'
+
+# be very verbose about what is happening
+isVerbose=0
