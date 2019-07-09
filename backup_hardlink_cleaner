@@ -174,8 +174,12 @@ for DIR in ${LOCAL_DIRS[*]}; do
 	remoteDirs=( $RES )
 
 	# remove the oldest backup so that it will never get deleted
-	echo "    I will preserve the oldest," ${remoteDirs[-1]}
-	unset 'remoteDirs[${#remoteDirs[@]}-1]'
+	if [ 0 == ${#remoteDirs[@]} ]; then
+		echo "    No backup found."
+	else
+		echo "    I will preserve the oldest," ${remoteDirs[-1]}
+		unset 'remoteDirs[${#remoteDirs[@]}-1]'
+	fi
 	
 	intervalS=$INTERVAL_INITIAL_s
 	execute --quiet date -u +%s

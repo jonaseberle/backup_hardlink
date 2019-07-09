@@ -109,6 +109,7 @@ for ((i=0; i < ${#LOCAL_DIRS[@]}; i++)); do
 			printf "     No recent backup found. Syncing '%s' to '%s'\n" "$dir" "${remoteDir}-wip"
 			DO="eval rsync --links --one-file-system --delete-after --timeout=100 -a$excludes $rsyncParams $dir $BACKUP_RSYNC_PREFIX${remoteDir}-wip"
 			[ 1 == $isVerbose ] && echo "       $DO"
+			$DO
 			_exitCodeRsync=$?
 			if [ 30 == $_exitCodeRsync ]; then # timeout
 				echo "   rsync encountered a timeout. We are retrying now !!!!"
@@ -118,6 +119,8 @@ for ((i=0; i < ${#LOCAL_DIRS[@]}; i++)); do
 				DO="eval $BACKUP_CONSOLE_PREFIX mv ${remoteDir}-wip $remoteDir" 
 				[ 1 == $isVerbose ] && echo "       $DO" 
 				$DO
+			else
+				echo "   rsync encountered an error. Exit code: $_exitCodeRsync during ‹$DO›" 
 			fi
 		fi
 	done
