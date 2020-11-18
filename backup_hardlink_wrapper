@@ -19,7 +19,10 @@ LOCKFILE=/var/lock/backup_hardlink
 	trap "rm $LOCKFILE 2> /dev/null" EXIT INT KILL TERM
 			        
 	# Error with --compress"
-	EXEC="$(dirname $THIS)/$(basename $THIS _wrapper) $CONF --partial --progress --verbose"
+
+	# use --usermap for rsync > v3.1.0
+	#EXEC="$(dirname $THIS)/$(basename $THIS _wrapper) $CONF --usermap=*:je --groupmap=*:root --partial-dir=.rsync-partial --progress --verbose --timeout=240 --rsh='ssh -o ServerAliveInterval=60'"
+	EXEC="$(dirname $THIS)/$(basename $THIS _wrapper) $CONF --no-owner --no-group --partial-dir=.rsync-partial --progress --verbose --timeout=240 --rsh='ssh -o ServerAliveInterval=60'"
 	ionice -c 2 -n 7 nice $EXEC >> $LOG 2>&1
 
 	EXEC="$(dirname $THIS)/$(basename $THIS _wrapper)_cleaner $CONF"
